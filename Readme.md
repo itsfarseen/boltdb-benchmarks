@@ -1,6 +1,8 @@
-# Experiment 1
+# BoltDB Benchmarks
 
-The code for this experiment is from commit `78c425c45b189cb710ed1856efb083037ab900d3`
+This experiment compares different strategies of storing a record in BoltDB and the performance implications.
+
+# Experiment Parameters
 
 It was run at the following record counts:
 
@@ -84,16 +86,11 @@ For each case of (Strategy, Insertion Mode) pair, we conduct the following tests
 
 Let N be the number of records in the DB.
 
-- Read:  
-  Read N/2 random records, one per transaction.
-- ReadMany:  
-  Read N/3 consecutive records, starting from the middle of the DB.
-- FieldSum:  
-  Find the sum of a field by iterating through the entire database.
-- Update:
-  Update a single field for N/2 random records, one update per transaction.
-- Storage:  
-  On disk size of the database.
+- Read: Read N/2 random records, one per transaction.
+- ReadMany: Read N/3 consecutive records, starting from the middle of the DB, in a single transaction.
+- FieldSum: Find the sum of a field by iterating through the entire database, in a single transaction.
+- Update: Update a single field for N/2 random records, one update per transaction.
+- Storage: On disk size of the database.
 
 For all of the tests except storage, time per single record is reported.  
 This is obtained by dividing the total time taken by the number of records.
@@ -102,7 +99,7 @@ This is obtained by dividing the total time taken by the number of records.
 
 ## Write
 
-![](./Write_time.png)
+![](./results/Write_time.png)
 
 **Analysis**
 
@@ -125,7 +122,7 @@ This is obtained by dividing the total time taken by the number of records.
 
 ## Read
 
-![](./Read_time.png)
+![](./results/Read_time.png)
 
 **Analysis**
 
@@ -137,7 +134,7 @@ This is obtained by dividing the total time taken by the number of records.
 
 ## ReadMany
 
-![](./ReadMany_time.png)
+![](./results/ReadMany_time.png)
 
 **Analysis**
 
@@ -152,7 +149,7 @@ This is obtained by dividing the total time taken by the number of records.
 
 ## FieldSum
 
-![](./FieldSum_time.png)
+![](./results/FieldSum_time.png)
 
 **Analysis**
 
