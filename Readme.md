@@ -161,7 +161,7 @@ This is obtained by dividing the total time taken by the number of records.
 
 ## Update
 
-![](Update_time.png)
+![](./results/Update_time.png)
 
 **Analysis**
 
@@ -172,7 +172,7 @@ This is obtained by dividing the total time taken by the number of records.
 
 ## Storage
 
-![](storage_growth.png)
+![](./results/storage_growth.png)
 
 **Analysis**
 
