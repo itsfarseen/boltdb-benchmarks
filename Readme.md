@@ -1,21 +1,24 @@
 # BoltDB Benchmarks
 
-This experiment compares different strategies of storing a record in BoltDB and the performance implications.
+This study evaluates different strategies for storing records in BoltDB and examines their performance trade-offs.
 
-# Experiment Parameters
+---
 
-It was run at the following record counts:
+## Experiment Setup
 
-- 10, 100, 1_000
-- 10_000, 25_000, 50_000, 75_000
-- 100_000, 250_000, 500_000, 750_000
-- 1_000_000
+Benchmarks were run at the following record counts:
 
-With 10 runs per scenario and averaging the results.
+* 10, 100, 1,000
+* 10,000, 25,000, 50,000, 75,000
+* 100,000, 250,000, 500,000, 750,000
+* 1,000,000
 
-This took several hours to run.
+Each scenario was repeated **10 times**, and results were averaged.
+The full suite of tests required several hours to complete.
 
-# Example Data Used
+---
+
+## Example Data
 
 ```go
 func generateUser(id int64) *UserInfo {
@@ -35,158 +38,191 @@ func generateUser(id int64) *UserInfo {
 		UpdatedAt:   time.Now().Unix(),
 		LoginCount:  int32(rand.Intn(1000)),
 		Score:       rand.Float64() * 100,
-		Description: fmt.Sprintf("This is a description for user %d with some random text to make it longer and more realistic.", id),
+		Description: fmt.Sprintf(
+			"This is a description for user %d with some random text to make it longer and more realistic.",
+			id,
+		),
 	}
 }
 ```
 
-# Scenarios Tested
+---
 
-We test six strategies of storage:
+## Storage Strategies Tested
 
-- Binary:  
-  Each entry is stored as a single KV pair.  
-  Key is the ID.  
-  Value is the struct field encoded as binary and concatenated.  
-  Like `Field1Value Field2Value Field3Value`  
-  This method is the most storage efficient.
-- Binary+Names:  
-  Each entry is stored as a single KV pair.  
-  Key is the ID.  
-  For value, the field's name and value are encoded into bytes and concatenated like:  
-  `Field1Name Field1Value Field2Name Field2Value Field3Name Field3Value`  
-  This method tries to simulate what Json/Gob is doing, but with no delimiters.
-- JSON:  
-  Each entry is stored as a single KV pair.  
-  Key is the ID.  
-  Value is the JSON encoding of the struct.
-- Gob:  
-  Each entry is stored as a single KV pair.  
-  Key is the ID.  
-  Value is the Gob encoding of the struct.
-- MultiKV:  
-  Each entry is stored as a series of KV pairs like:  
-  `ID1 Field1Name -> Field1Value`  
-  `ID1 Field2Name -> Field2Value`  
-  `ID2 Field1Name -> Field1Value`  
-  `ID2 Field2Name -> Field2Value`
-- NestedBuckets:  
-  Each entry is stored under a nested bucket.  
-  `ID -> Nested Bucket`  
-  Nested Bucket consists of one KV pair per field: `Field name -> Field value`.
+Six encoding strategies were benchmarked:
 
-For each of these strategies we further test two variants:
+* **Binary**
 
-- Entries are inserted at one entry per transaction.
-- All entries are inserted in a single transaction.
+  * One KV pair per record.
+  * Key = ID, Value = binary-encoded concatenation of fields.
+  * Most storage-efficient representation.
 
-This is to check if the method of insertion causes the data layout to be different, potentially affecting the results.
+* **Binary+Names**
 
-For each case of (Strategy, Insertion Mode) pair, we conduct the following tests:
+  * One KV pair per record.
+  * Value = alternating field names and values (no delimiters).
+  * Mimics JSON/Gob layout but without structural markers.
 
-Let N be the number of records in the DB.
+* **JSON**
 
-- Read: Read N/2 random records, one per transaction.
-- ReadMany: Read N/3 consecutive records, starting from the middle of the DB, in a single transaction.
-- FieldSum: Find the sum of a field by iterating through the entire database, in a single transaction.
-- Update: Update a single field for N/2 random records, one update per transaction.
-- Storage: On disk size of the database.
+  * One KV pair per record.
+  * Value = JSON serialization of struct.
 
-For all of the tests except storage, time per single record is reported.  
-This is obtained by dividing the total time taken by the number of records.
+* **Gob**
 
-# Results
+  * One KV pair per record.
+  * Value = Gob serialization of struct.
 
-## Write
+* **MultiKV**
+
+  * Multiple KV pairs per record:
+    `ID1.Field1 → Value`
+    `ID1.Field2 → Value`
+    …
+
+* **NestedBuckets**
+
+  * One bucket per record, keyed by ID.
+  * Each bucket contains field → value pairs.
+
+For each strategy, two insertion modes were compared:
+
+1. **Single** – one record per transaction.
+2. **Bulk** – all records inserted in a single transaction.
+
+This allows us to observe whether insertion method influences on-disk layout and subsequent performance.
+
+---
+
+## Tests Conducted
+
+For each `(Strategy, Insertion Mode)` combination and database size `N`, the following tests were run:
+
+* **Read** – fetch `N/2` random records, one per transaction.
+* **ReadMany** – fetch `N/3` consecutive records from the midpoint, in a single transaction.
+* **FieldSum** – compute the sum of a single field by iterating over all records.
+* **Update** – update one field for `N/2` random records, one per transaction.
+* **Storage** – measure on-disk database size.
+
+All performance results (except storage) are reported as **time per record**, calculated as total time divided by number of records.
+
+---
+
+## Results
+
+### Write
 
 ![](./results/Write_time.png)
 
+**Test description**
+Insert records into the database.
+
+* **Single**: one record per transaction.
+* **Bulk**: all records inserted in a single transaction.
+
 **Analysis**
 
-- Inserting one record per transaction takes about 30-50us per record.  
-  In a typical web server, it is common to insert less than 10 records per transaction, so the insertion performance will be close to this than bulk insertion.
-- Inserting all records in a single transaction takes about 2-10us, except for NestedBucket and MultiKV methods.
-- Having too many keys or nested buckets severly affect the write performance.
-  - NestedBucket (Bulk) has the worst insert time of 50us.
-  - MultiKV (Bulk) has the insert time of 32us, which is close to JSON (Single) at 34us.
-  - These are worse than inserting a single record per transaction using other encodings, including Gob.  
-    It will be apparent that Gob is the slowest encoding from the tests that follow below.
-- I expected write time per record to go down, as the transaction cost is amortized across more records.  
-  But it turns out that this is only true for approx the first 1000 records.  
-  After that it's very close to the asymptote and no improvement can be seen.  
-  In fact, it increases slightly with the database size, possibly because of increase in the depth of the B+ Tree.  
-  This is supported by the insertion time going up significantly for MultiKV and NestedBucket encodings.
-- Gob consistently performs worse than JSON.
-- JSON and Binary+Names stragies are very close.
-- Binary encoding performs the best, as expected.
+* Inserting one record per transaction takes about 30–50 µs per record.
+  In a typical web server, transactions usually insert <10 records, so performance will be closer to this case than to bulk.
+* Inserting all records in a single transaction takes \~2–10 µs, except for NestedBucket and MultiKV.
+* Too many keys or nested buckets severely degrade performance:
 
-## Read
+  * NestedBucket (Bulk): \~50 µs/record (worst).
+  * MultiKV (Bulk): \~32 µs/record, similar to JSON (Single).
+* Performance plateaus after \~1k records, then slightly worsens as the B+-tree deepens.
+* Gob is consistently slower than JSON.
+* Binary+Names ≈ JSON.
+* Binary is the fastest.
+
+---
+
+### Read
 
 ![](./results/Read_time.png)
 
+**Test description**
+Read `N/2` random records, one per transaction.
+
 **Analysis**
 
-- Gob is very slow. >3x as slow as JSON which is the next worst performer.
-- Bulk vs Single insert mode doesn't affect the read performance.
-- MultiKV and NestedBuckets have very similar performance.  
-  This could be because we are only reading one bucket per-transaction, with atmost one sub bucket indirection per transaction.
-- Binary encoding performs the best, as expected.
+* Gob is >3× slower than JSON (the next worst).
+* Insert mode does not affect read performance.
+* MultiKV ≈ NestedBuckets, since each lookup involves at most one sub-bucket.
+* Binary is fastest.
 
-## ReadMany
+---
+
+### ReadMany
 
 ![](./results/ReadMany_time.png)
 
+**Test description**
+Read `N/3` consecutive records starting from the midpoint, in a single transaction.
+
 **Analysis**
 
-- Gob continues to be very slow. Now almost 3.75x as slow as JSON which is the next worst performer.
-- Bulk vs Single insert mode doesn't affect the read performance.
-- MultiKV and NestedBuckets performances now diverge.
-  This is could be because of the sub-bucket indirection cost becoming more dominant as we access many in a single transaction.
-- MultiKV and Binary encodings have the same performance in this scenario.  
-  MultiKV is faster than Binary+Names encoding, despite both of them storing the full field names.  
-  This shows that accessing consecutive KV pairs are as fast as, if all of their values were crammed into a single KV pair.  
-  I don't understand how MultiKV is faster than Binary+Names though, as both of them have to dispatch on the field names to decode the field values.
+* Gob is \~3.75× slower than JSON.
+* Insert mode has no effect.
+* MultiKV and NestedBuckets diverge—NestedBuckets are penalized by sub-bucket indirection.
+* MultiKV ≈ Binary. Surprisingly, MultiKV outperforms Binary+Names even though both store field names.
+* Consecutive KV access is as efficient as tightly packed KV storage.
 
-## FieldSum
+---
+
+### FieldSum
 
 ![](./results/FieldSum_time.png)
 
+**Test description**
+Iterate over the entire database and compute the sum of a field, in a single transaction.
+
 **Analysis**
 
-- Gob continues to be very slow.
-- The results are very similar to the ReadMany case, except that NestedBucket is now as fast MultiKV and Binary.
-  Apparently, accessing a single field from a nested bucket is as fast as accessing a single field using the MultiKV encoding.
-- Interestingly, Binary encoding is also as fast as MultiKV encoding.  
-  It looks like deserializing the entire record is very cheap when using the Binary encoding.
+* Gob remains the slowest.
+* NestedBuckets ≈ MultiKV ≈ Binary when scanning for a single field.
+* Binary performs as fast as MultiKV: deserializing the full record is cheap in this encoding.
 
-## Update
+---
+
+### Update
 
 ![](./results/Update_time.png)
 
+**Test description**
+Update a single field for `N/2` random records, one update per transaction.
+
 **Analysis**
 
-- Gob continues to be very slow. Approx. 2x as slow as the best encoding and approx. 1.5x as slow as the second worst encoding.
-- MultiKV (Bulk) performs slightly better than Binary (Bulk/Single) and MultiKV (Single) at 1M records.  
-  No other encoding has this descrepancy between Bulk/Single insertion modes. But this is a very minor difference.
-  NestedBucket (Single/Bulk) is very close to these two encodings.
+* Gob is \~2× slower than the best encoding, \~1.5× slower than the second worst.
+* MultiKV (Bulk) slightly outperforms Binary and NestedBucket at 1M records, though the difference is small.
+* Otherwise, Binary and NestedBucket are on par.
 
-## Storage
+---
+
+### Storage
 
 ![](./results/storage_growth.png)
 
+**Test description**
+Measure on-disk database size.
+
 **Analysis**
 
-- MultiKV and NestedBuckets have the worst storage efficiency because they store the field names.
-- Interestingly, JSON, Gob, Binary+Names performs better than MultiKV and NestedBuckets.  
-  This could be because in MultiKV and NestedBuckets there are more KV pairs (num records \* num fields).
-- As expected, the binary encoding is very efficient. 2x better than the next best encoding and 3x better than the worst encoding.
+* MultiKV and NestedBuckets are the least space-efficient (field names stored repeatedly).
+* JSON, Gob, and Binary+Names compress better because record count × field count amplifies overhead in MultiKV/NestedBuckets.
+* Binary is the most efficient: \~2× smaller than the next best, \~3× smaller than the worst.
 
-## Overall thoughts
+---
 
-- Gob has worse encoding/decoding performance than JSON, while taking almost the same space in storage.
-- NestedBucket and MultiKV encodings have the worst write performance.
-- JSON is a decent choice for storing records in BoltDB.
-- It is not worth inventing a custom Binary+Names encoding. Its performance is comparable to JSON.
-- The best performance can be obtained by keeping most of the data of a record in a single KV pair, while extracting a few commonly updated fields out to their own KV pairs.
-- To squeeze out maximum performance, use custom binary encoding where field names are omitted and field values are tightly packed.  
-  For small records upto 200-300 bytes in size, paying the serialization/deserialization overhead to update a single field can be faster than updating a single field in NestedBucket or MultiKV encoding.
+## Conclusions
+
+* **Gob**: poor performance, similar space usage to JSON.
+* **NestedBucket / MultiKV**: worst write throughput and storage efficiency.
+* **JSON**: practical, balanced option for BoltDB.
+* **Binary+Names**: no real advantage over JSON; unnecessary.
+* **Best practice**: store most record data in a single KV pair, and extract only frequently updated fields into separate KV pairs.
+* **Maximum performance**: use compact binary encoding without field names.
+  For small records (≤200–300 B), the cost of re-serializing entire records is often lower than updating per-field in NestedBucket or MultiKV layouts.
+
+---
